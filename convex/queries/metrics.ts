@@ -6,10 +6,12 @@ export const getMetrics = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("No autenticado");
-    return await ctx.db
+    const metrics = await ctx.db
       .query("usageMetrics")
       .withIndex("by_user", (q) => q.eq("userId", identity.subject))
       .collect();
+    // Strip rawResponse — never send raw API responses to the frontend
+    return metrics.map(({ rawResponse, ...rest }) => rest);
   },
 });
 

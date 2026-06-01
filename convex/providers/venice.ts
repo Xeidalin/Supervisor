@@ -1,13 +1,7 @@
 import { ProviderDefinition } from "./types";
+import { toMinorUnits, getDecimals } from "../utils/money";
 
-function toMinorUnits(decimalStr: string, decimals: number): string {
-  const num = parseFloat(decimalStr);
-  if (isNaN(num)) return "0";
-  const [whole, frac = ""] = decimalStr.split(".");
-  const paddedFrac = frac.padEnd(decimals, "0").substring(0, decimals);
-  const result = whole + paddedFrac;
-  return result.replace(/^0+(\d)/, "$1") || "0";
-}
+const EXTRA_PRECISION = 4; // extra decimal places for accurate summation
 
 export const veniceProvider: ProviderDefinition = {
   id: "venice",
@@ -22,58 +16,101 @@ export const veniceProvider: ProviderDefinition = {
     manualEntryAvailable: true,
   },
   async fetchUsage(apiKey: string) {
-    // Fetch current month usage (first page)
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
       .toISOString()
       .split("T")[0];
     const endDate = now.toISOString().split("T")[0];
+    const baseUrl = "https://api.venice.ai/api/v1/billing/usage";
 
-    const url = `https://api.venice.ai/api/v1/billing/usage?startDate=${startOfMonth}&endDate=${endDate}&limit=200&sortOrder=desc`;
+    // Fetch all pages
+    const allEntries: Array<{
+      amount: number;
+      currency: string;
+      units: number;
+      pricePerUnitUsd: number;
+      timestamp: string;
+    }> = [];
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-    });
+    let page = 1;
+    let totalPages = 1;
+    const limit = 200;
 
-    if (!response.ok) {
-      throw new Error(
-        `Venice API error: ${response.status} ${response.statusText}`,
-      );
+    while (page <= totalPages) {
+      const url = `${baseUrl}?startDate=${startOfMonth}&endDate=${endDate}&limit=${limit}&page=${page}&sortOrder=desc`;
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Venice API error: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const data = (await response.json()) as {
+        data: Array<{
+          amount: number;
+          currency: string;
+          units: number;
+          pricePerUnitUsd: number;
+          timestamp: string;
+        }>;
+        pagination: { total: number; page: number; totalPages: number };
+      };
+
+      if (data.data) {
+        allEntries.push(...data.data);
+      }
+
+      totalPages = data.pagination?.totalPages ?? 1;
+      page++;
     }
 
-    const data = (await response.json()) as {
-      data: Array<{
-        amount: number;
-        currency: string;
-        units: number;
-        pricePerUnitUsd: number;
-        timestamp: string;
-      }>;
-      pagination: { total: number; page: number; totalPages: number };
-    };
-
-    // Aggregate all entries for the month
-    let totalAmount = 0;
-    const currency = data.data?.[0]?.currency ?? "USD";
-    const decimals = 2;
-
-    for (const entry of data.data ?? []) {
-      totalAmount += entry.amount ?? 0;
+    if (allEntries.length === 0) {
+      const currency = "USD";
+      const decimals = getDecimals(currency);
+      return {
+        balanceMinor: null,
+        costThisMonthMinor: "0",
+        dailySpendMinor: null,
+        currency,
+        decimals,
+        rawData: { entries: [] },
+      };
     }
 
-    // If there are more pages, we'd fetch them. For MVP, just page 1.
-    const costThisMonth = totalAmount.toFixed(decimals);
+    const currency = allEntries[0].currency ?? "USD";
+    const decimals = getDecimals(currency);
+
+    // Accumulate in minor units with extra precision to avoid float errors.
+    // Each entry's amount is converted to an integer at (decimals + extra) precision,
+    // summed as BigInt, then rounded back to the standard decimal places.
+    const precision = decimals + EXTRA_PRECISION;
+    let totalMinor = BigInt(0);
+
+    for (const entry of allEntries) {
+      const amountStr = entry.amount?.toString() ?? "0";
+      const minorWithExtra = toMinorUnits(amountStr, precision);
+      totalMinor += BigInt(minorWithExtra);
+    }
+
+    // Round back from extended precision to target decimals
+    const divisor = BigInt(10) ** BigInt(EXTRA_PRECISION);
+    const remainder = totalMinor % divisor;
+    const rounded = totalMinor / divisor + (remainder * BigInt(2) >= divisor ? BigInt(1) : BigInt(0));
 
     return {
       balanceMinor: null,
-      costThisMonthMinor: toMinorUnits(costThisMonth, decimals),
+      costThisMonthMinor: rounded.toString(),
       dailySpendMinor: null,
       currency,
       decimals,
-      rawData: data,
+      rawData: { entries: allEntries },
     };
   },
   async validateApiKey(apiKey: string) {
