@@ -24,12 +24,13 @@ export const getActiveApiKey = internalQuery({
 });
 
 export const getLatestSnapshot = internalQuery({
-  args: { providerId: v.id("providers") },
+  args: { userId: v.string(), providerId: v.id("providers") },
   handler: async (ctx, args) => {
     return await ctx.db
       .query("metricSnapshots")
-      .withIndex("by_user_provider_time", () => "")
-      .filter((q) => q.eq(q.field("providerId"), args.providerId))
+      .withIndex("by_user_provider_time", (q) =>
+        q.eq("userId", args.userId).eq("providerId", args.providerId),
+      )
       .order("desc")
       .first();
   },
