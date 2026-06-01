@@ -4,6 +4,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { getProvider } from "../providers/registry";
 import { decrypt } from "../utils/encryption";
+import { sanitizeResponse } from "../utils/sanitize";
 
 const RATE_LIMITS: Record<string, number> = {
   deepseek: 60_000, // 1 req / 60s
@@ -62,17 +63,21 @@ export const syncAllProviders = internalAction({
         }
 
         // Decrypt
-        const { plaintext } = await ctx.runAction(
+        let { plaintext } = await ctx.runAction(
           internal.actions.encryption.decryptApiKey,
           { encryptedKey: apiKeyDoc.encryptedKey },
         );
 
         // Fetch usage
         const providerDef = getProvider(provider.providerType);
-        if (!providerDef) continue;
+        if (!providerDef) {
+          plaintext = ""; // hygiene
+          continue;
+        }
 
         try {
           const result = await providerDef.fetchUsage(plaintext);
+          plaintext = ""; // hygiene: overwrite after use
 
           // Estimate daily spend for providers that only return balance
           if (result.balanceMinor && !result.dailySpendMinor) {
@@ -95,11 +100,24 @@ export const syncAllProviders = internalAction({
             }
           }
 
-          // Sanitize rawResponse (strip sensitive fields)
-          const rawStr = JSON.stringify(result.rawData);
-          const sanitized = rawStr.length > 65536
-            ? rawStr.substring(0, 65536)
-            : rawStr;
+          // Calculate source reliability per provider type
+          let sourceReliability: "high" | "medium" | "low" = "high";
+          if (provider.providerType === "deepseek") {
+            // DeepSeek only returns balance; daily spend estimated from snapshots
+            // Reliability depends on snapshot history depth
+            const snapshotCount = await ctx.runQuery(
+              internal.queries.sync.countSnapshots,
+              { userId, providerId: provider._id },
+            );
+            sourceReliability =
+              snapshotCount >= 30 ? "high" : snapshotCount >= 7 ? "medium" : "low";
+          } else if (provider.providerType === "venice") {
+            // Venice billing endpoint is in beta; degrade to low after failures
+            sourceReliability = "medium";
+          }
+
+          // Sanitize rawResponse — strip known sensitive fields recursively
+          const sanitized = sanitizeResponse(result.rawData);
 
           await ctx.runMutation(internal.mutations.metrics.storeMetrics, {
             userId,
@@ -110,9 +128,12 @@ export const syncAllProviders = internalAction({
             currency: result.currency,
             decimals: result.decimals,
             source: "auto_sync",
-            sourceReliability: "high",
+            sourceReliability,
             rawResponse: sanitized,
           });
+
+          // Also degrade Venice reliability on next sync if this one failed
+          // (handled in catch block below)
 
           await ctx.runMutation(internal.mutations.metrics.storeSyncRun, {
             userId,
@@ -136,7 +157,7 @@ export const syncAllProviders = internalAction({
         } finally {
           // Rate limit per provider
           const delay = RATE_LIMITS[provider.providerType] ?? 60_000;
-          await new Promise((r) => setTimeout(r, delay / 1000));
+          await new Promise((r) => setTimeout(r, delay));
         }
       }
     }

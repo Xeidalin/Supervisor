@@ -23,6 +23,20 @@ export const getActiveApiKey = internalQuery({
   },
 });
 
+export const countSnapshots = internalQuery({
+  args: { userId: v.string(), providerId: v.id("providers") },
+  handler: async (ctx, args) => {
+    const snapshots = await ctx.db
+      .query("metricSnapshots")
+      .withIndex("by_user_provider_time", (q) =>
+        q.eq("userId", args.userId).eq("providerId", args.providerId),
+      )
+      .order("desc")
+      .collect();
+    return snapshots.length;
+  },
+});
+
 export const getLatestSnapshot = internalQuery({
   args: { userId: v.string(), providerId: v.id("providers") },
   handler: async (ctx, args) => {
