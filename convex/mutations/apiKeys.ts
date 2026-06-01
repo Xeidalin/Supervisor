@@ -43,20 +43,26 @@ export const storeEncryptedKey = internalMutation({
 });
 
 /**
- * Public query: get masked API keys for a provider.
- * NEVER returns encryptedKey.
+ * Get masked API keys for a provider.
+ * Auth is verified server-side. NEVER returns encryptedKey.
  */
 export const getApiKeys = mutation({
   args: {
     providerId: v.id("providers"),
-    userId: v.string(),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("No autenticado");
+    const userId = identity.subject;
+
+    const keys = await ctx.db
       .query("apiKeys")
       .withIndex("by_user_provider", (q) =>
-        q.eq("userId", args.userId).eq("providerId", args.providerId),
+        q.eq("userId", userId).eq("providerId", args.providerId),
       )
       .collect();
+
+    // Strip sensitive fields before returning to frontend
+    return keys.map(({ encryptedKey, ...rest }) => rest);
   },
 });

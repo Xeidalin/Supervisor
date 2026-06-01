@@ -1,19 +1,5 @@
 import { ProviderDefinition } from "./types";
-
-/**
- * Convert a decimal string like "110.00" to minor units string "11000"
- * for currencies with 2 decimals.
- */
-function toMinorUnits(decimalStr: string, decimals: number): string {
-  const num = parseFloat(decimalStr);
-  if (isNaN(num)) return "0";
-  // Use string math to avoid floating point issues
-  const [whole, frac = ""] = decimalStr.split(".");
-  const paddedFrac = frac.padEnd(decimals, "0").substring(0, decimals);
-  const result = whole + paddedFrac;
-  // Remove leading zeros but keep at least one digit
-  return result.replace(/^0+(\d)/, "$1") || "0";
-}
+import { toMinorUnits, getDecimals } from "../utils/money";
 
 export const deepseekProvider: ProviderDefinition = {
   id: "deepseek",
@@ -48,14 +34,20 @@ export const deepseekProvider: ProviderDefinition = {
       }>;
     };
 
-    // Use first balance info entry
+    if (!data.is_available) {
+      throw new Error("DeepSeek API is currently unavailable");
+    }
+
     const balanceInfo = data.balance_infos?.[0];
-    const currency = balanceInfo?.currency ?? "USD";
-    const decimals = currency === "CNY" ? 2 : 2;
-    const totalBalance = balanceInfo?.total_balance ?? "0";
+    if (!balanceInfo) {
+      throw new Error("DeepSeek returned empty balance_infos");
+    }
+
+    const currency = balanceInfo.currency;
+    const decimals = getDecimals(currency);
 
     return {
-      balanceMinor: toMinorUnits(totalBalance, decimals),
+      balanceMinor: toMinorUnits(balanceInfo.total_balance, decimals),
       costThisMonthMinor: null,
       dailySpendMinor: null,
       currency,

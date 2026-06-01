@@ -1,13 +1,5 @@
 import { ProviderDefinition } from "./types";
-
-function toMinorUnits(decimalStr: string, decimals: number): string {
-  const num = parseFloat(decimalStr);
-  if (isNaN(num)) return "0";
-  const [whole, frac = ""] = decimalStr.split(".");
-  const paddedFrac = frac.padEnd(decimals, "0").substring(0, decimals);
-  const result = whole + paddedFrac;
-  return result.replace(/^0+(\d)/, "$1") || "0";
-}
+import { toMinorUnits, getDecimals } from "../utils/money";
 
 export const veniceProvider: ProviderDefinition = {
   id: "venice",
@@ -58,7 +50,7 @@ export const veniceProvider: ProviderDefinition = {
     // Aggregate all entries for the month
     let totalAmount = 0;
     const currency = data.data?.[0]?.currency ?? "USD";
-    const decimals = 2;
+    const decimals = getDecimals(currency);
 
     for (const entry of data.data ?? []) {
       totalAmount += entry.amount ?? 0;
