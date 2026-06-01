@@ -1,3 +1,5 @@
+"use node";
+
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { getProvider } from "../providers/registry";
@@ -25,7 +27,7 @@ export const syncAllProviders = internalAction({
 
     // 1. Get all users who have at least one provider
     const allProviders = await ctx.runQuery(
-      internal.queries.getAllAutoSyncProviders,
+      internal.queries.sync.getAllAutoSyncProviders,
       {},
     );
 
@@ -44,7 +46,7 @@ export const syncAllProviders = internalAction({
 
         // Get API key
         const apiKeyDoc = await ctx.runQuery(
-          internal.queries.getActiveApiKey,
+          internal.queries.sync.getActiveApiKey,
           { providerId: provider._id },
         );
         if (!apiKeyDoc) {
@@ -75,8 +77,8 @@ export const syncAllProviders = internalAction({
           // Estimate daily spend for providers that only return balance
           if (result.balanceMinor && !result.dailySpendMinor) {
             const prevSnapshot = await ctx.runQuery(
-              internal.queries.getLatestSnapshot,
-              { providerId: provider._id },
+              internal.queries.sync.getLatestSnapshot,
+              { userId, providerId: provider._id },
             );
             if (prevSnapshot?.balanceMinor) {
               const prevBalance = BigInt(prevSnapshot.balanceMinor);
@@ -102,9 +104,9 @@ export const syncAllProviders = internalAction({
           await ctx.runMutation(internal.mutations.metrics.storeMetrics, {
             userId,
             providerId: provider._id,
-            balanceMinor: result.balanceMinor,
-            costThisMonthMinor: result.costThisMonthMinor,
-            dailySpendMinor: result.dailySpendMinor,
+            balanceMinor: result.balanceMinor ?? undefined,
+            costThisMonthMinor: result.costThisMonthMinor ?? undefined,
+            dailySpendMinor: result.dailySpendMinor ?? undefined,
             currency: result.currency,
             decimals: result.decimals,
             source: "auto_sync",
@@ -118,8 +120,8 @@ export const syncAllProviders = internalAction({
             startedAt,
             finishedAt: Date.now(),
             status: "success",
-            balanceSnapshotMinor: result.balanceMinor,
-            dailySpendSnapshotMinor: result.dailySpendMinor,
+            balanceSnapshotMinor: result.balanceMinor ?? undefined,
+            dailySpendSnapshotMinor: result.dailySpendMinor ?? undefined,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error";

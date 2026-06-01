@@ -1,3 +1,5 @@
+"use node";
+
 import { v } from "convex/values";
 import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
@@ -30,7 +32,7 @@ export const addApiKey = action({
 
     // 1. VERIFY OWNERSHIP
     const provider = await ctx.runQuery(
-      internal.queries.getProviderById,
+      internal.queries.providers.getProviderById,
       { providerId: args.providerId },
     );
     if (!provider || provider.userId !== userId) {
