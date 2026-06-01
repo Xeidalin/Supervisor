@@ -71,6 +71,9 @@ export const syncAllProviders = internalAction({
         // Fetch usage
         const providerDef = getProvider(provider.providerType);
         if (!providerDef) {
+          console.error(
+            `syncAllProviders: unknown provider type "${provider.providerType}" for provider ${provider._id}`,
+          );
           plaintext = ""; // hygiene
           continue;
         }

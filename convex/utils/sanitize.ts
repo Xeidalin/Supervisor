@@ -31,7 +31,27 @@ const MAX_JSON_SIZE = 65536; // 64 KiB
 export function sanitizeResponse(data: unknown): string {
   const sanitized = sanitizeValue(data, 0);
   const json = JSON.stringify(sanitized);
-  return json.length > MAX_JSON_SIZE ? json.substring(0, MAX_JSON_SIZE) : json;
+  if (json.length <= MAX_JSON_SIZE) return json;
+
+  // Truncate at a clean boundary then close open brackets
+  let truncated = json.substring(0, MAX_JSON_SIZE);
+  const openBraces = (truncated.match(/{/g) || []).length;
+  const closeBraces = (truncated.match(/}/g) || []).length;
+  const openBrackets = (truncated.match(/\[/g) || []).length;
+  const closeBrackets = (truncated.match(/\]/g) || []).length;
+
+  truncated += "}".repeat(Math.max(0, openBraces - closeBraces));
+  truncated += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+  // Remove last incomplete string if any (trailing quote without matching)
+  const lastQuote = truncated.lastIndexOf('"');
+  if (
+    lastQuote > 0 &&
+    (truncated.match(/"/g) || []).length % 2 !== 0
+  ) {
+    truncated = truncated.substring(0, lastQuote) + '"[TRUNCATED]"';
+  }
+
+  return truncated;
 }
 
 function sanitizeValue(value: unknown, depth: number): unknown {
